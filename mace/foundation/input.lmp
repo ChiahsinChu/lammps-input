@@ -4,6 +4,7 @@ variable        THERMO_FREQ     equal 10
 variable        DUMP_FREQ       equal 1
 variable        RESTART_FREQ    equal 10000
 variable        TEMP            equal 330
+variable        SEED            equal 1
 
 # ---------------------- INITIALIZAITION ------------------
 units           metal
