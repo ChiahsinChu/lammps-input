@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+#BSUB -q 52-medium
+#BSUB -W 12:00
+#BSUB -J conp
+#BSUB -o lammps.%J.stdout
+#BSUB -e lammps.%J.stderr
+#BSUB -n 28
+#BSUB -R "span[ptile=28]"
+
+# add modulefiles
+module load intel/17.5.239
+module load mpi/intel/2017.5.239
+module load lammps/27May21
+
+mpiexec.hydra lmp -in input.lmp > output_$LSB_JOBID
+rm core*
+#>trj_dump.lammpstrj
+#>system.lammpstrj
+#
+#for i in {1..20..1}
+#do
+#  for z in {1..2..1}
+#  do
+#  cat system.lammpstrj >> trj_dump.lammpstrj
+#  mpiexec.hydra lmp -in process_${z}.lmp > output_${i}_${z}_$LSB_JOBID
+#  done
+#done
+#
+#mv trj_dump.lammpstrj trj_$LSB_JOBID.lammpstrj
+
+

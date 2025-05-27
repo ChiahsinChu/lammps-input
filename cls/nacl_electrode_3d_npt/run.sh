@@ -1,0 +1,1 @@
+lmp_mpi -i input.lmp -v DV 1.0

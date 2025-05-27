@@ -1,0 +1,199 @@
+
+# ------------ Global defined in system -----------------
+variable q_bin_width equal 0.2
+variable Nevery equal 1
+variable Nrepeat equal 100
+variable Nfreq equal 1000
+
+# ----------------- Init Section -----------------
+
+atom_style full
+boundary p p p
+units real
+bond_style harmonic
+angle_style harmonic
+dihedral_style opls
+improper_style harmonic
+pair_style lj/cut/coul/long 10.0 10.0
+pair_modify mix arithmetic
+kspace_style pppm/electrode 1e-5
+#  kspace_modify slab 5.0
+
+# ----------------- Atom Definition Section -----------------
+
+read_data "system.data"
+# read_data "after_system.data"
+#read_restart "system.restart.100000"
+restart 100000 system.restart
+
+# ----------------- Settings Section -----------------
+
+pair_coeff 1 1 0.71 4.02
+pair_coeff 2 2 0.0005 4.07
+pair_coeff 3 3 0.1521 3.15061
+pair_coeff 4 4 0.0 0.0
+#  pair_coeff 5 5 0.07 3.23
+#  pair_coeff 6 6 0.07 3.23
+#  pair_coeff 7 7 0.07 3.23
+#  pair_coeff 8 8 0.07 3.23
+#  pair_coeff 9 9 0.07 3.23
+#  pair_coeff 10 10 0.07 3.23
+pair_coeff 1 5*10  0.223 3.63
+pair_coeff 2 5*10  0.006 3.65
+pair_coeff 3 5*10  0.104 3.19
+pair_coeff 4 5*10  0.0 0.0
+#  pair_coeff 5*10 5*10 0.07 3.23 # Interactions between slabs is ignored (slabs are fixed)
+pair_coeff 5*10 5*10 0.0 0.0
+bond_coeff 1 450.0 0.9572
+angle_coeff 1 55.0 104.52
+set type 1 charge -1.0
+set type 2 charge 1.0
+set type 3 charge -0.8340
+set type 4 charge 0.4170
+set type 5*10 charge 0
+group tip3p type 3:4
+fix fShaketip3p tip3p shake 0.0001 20 100 b 1 a 1
+
+#----------------- Def groups and variables -----------------
+
+group slab type 5:10
+group slabl type 5:7
+group slabr type 8:10
+group rest type 1:4
+
+#### left electrode:
+variable z_slabr equal z[1]
+
+#### right electrode:
+variable z_slabl equal z[960]
+
+#### bulk region z:
+variable bulk_c equal (v_z_slabl+v_z_slabr+lz)/2
+variable bulk_gap equal 30
+variable bulk_l equal zhi-v_bulk_gap/2
+variable bulk_r equal zlo+v_bulk_gap/2
+
+#### Def bulk region:
+region v_rest1 block INF INF INF INF ${bulk_l} INF
+region v_rest2 block INF INF INF INF INF ${bulk_r}
+region v_rest union 2 v_rest1 v_rest2
+group gbulk dynamic all region v_rest
+
+# ----------------- Normal setting -----------------
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check no
+log log.lammps
+
+# ----------------- Computations during MD simulations -----------------
+
+#### Compute temperature of all electrolytes:
+compute Crest rest temp
+
+#### Compute Density of bulk region:
+compute MASS gbulk property/atom mass
+compute allmass gbulk reduce sum c_MASS
+variable bulk_mass equal c_allmass
+variable density_bulk equal v_bulk_mass/(xhi*yhi*v_bulk_gap)*1.661130 #Parameter to convert (g/mol)/(Å^3) to g/cm^3
+
+#### Compute 1d Charge profile along z-axis:
+#compute CHARGE all property/atom q
+#compute CHUNK_XBIN_ALL all chunk/atom bin/1d z lower ${q_bin_width}
+#fix CHARGE_DENSITY_FIX all ave/chunk ${Nevery} ${Nrepeat} ${Nfreq} CHUNK_XBIN_ALL c_CHARGE file Out.charge_density norm none ave running overwrite
+
+#### Compute 2d Charge distribution on electrode surface (only the first layer, LFT=left & RIT=right):
+#compute CHARGE_LFT_2d slabl property/atom q
+#fix CHARGE_DENSITY_LFT_2d slabl ave/atom ${Nevery} ${Nrepeat} ${Nfreq} c_CHARGE_LFT_2d  #file Out.charge_density_2d_lft 
+#dump Out.Charges_Q_LFT slabl custom ${Nfreq} Out.Charges_Q_LFT id x y z f_CHARGE_DENSITY_LFT_2d
+#dump_modify Out.Charges_Q_LFT sort id #format line "%ld %g %g %g %15.7f"
+
+#compute CHARGE_RIT_2d slabr property/atom q
+#fix CHARGE_DENSITY_RIT_2d slabr ave/atom ${Nevery} ${Nrepeat} ${Nfreq} c_CHARGE_RIT_2d  #file Out.charge_density_2d_lft 
+#dump Out.Charges_Q_RIT slabr custom ${Nfreq} Out.Charges_Q_RIT id x y z f_CHARGE_DENSITY_RIT_2d
+#dump_modify Out.Charges_Q_RIT sort id #format line "%ld %g %g %g %15.7f"
+
+compute E_COUL all pair lj/cut/coul/long ecoul
+compute P_E all pe
+variable e_coul equal c_E_COUL
+variable pe equal c_P_E 
+fix ALL_E all print ${Nfreq} "${pe} ${e_coul} $(v_pe-v_e_coul)" title "P_e E_coul E_rest" file All_E.out
+
+# ----------------- Control printout -----------------
+thermo 1
+thermo_style custom step c_Crest temp ke pe etotal econserve ecouple press v_bulk_l v_bulk_r v_bulk_c zhi v_density_bulk
+
+# ----------------- Trajectory dump -----------------
+dump trj all custom 1000 system.lammpstrj id type element xu yu zu q
+dump_modify trj sort id element Cl Na O H C C C C C C 
+
+# ----------------- Other setting Section -----------------
+
+#### slabs on both sides:
+variable slab_reset equal zlo-v_z_slabr
+variable slab_thickness equal -3.4*5/2
+displace_atoms all move 0 0 v_slab_reset
+displace_atoms all move 0 0 v_slab_thickness
+
+#### slabs in the middle:
+displace_atoms all move 0 0 $(lz/2)
+
+#### keep slabs position:
+fix cells slab recenter NULL NULL INIT
+
+#### Control potential difference between electrodes:
+#variable ${DV} equal 1
+variable v_zfield equal ${DV}/(zhi-zlo)
+fix efield all efield 0.0 0.0 ${v_zfield}
+# fix conp slabl conp 1 slabr 1.979 ${DV} conp.log pppm etypes 6 5 6 7 8 9 10 ffield
+fix fxconp slabl electrode/conp 0.0 1.979 couple slabr ${DV} symm on ffield on
+
+#### Control the piston in simulation (method to reproduce NPT in 2d simulation):
+fix fxRIGl slab rigid single force 1 off off off torque 1 off off off reinit no
+#velocity slab set 0 0 0
+#fix fx_slab slab setforce 0 0 0
+#velocity slab set 0 0 0
+#unfix fx_slab
+# use "on" and "off" to control the volume of electrolytes
+#fix fxRIGl slabl rigid single force 1 off off off torque 1 off off off reinit no
+#fix fxRIGr slabr rigid single force 1 off off off torque 1 off off off reinit no
+#fix Fpressure slabr addforce 0 0 -0.00611 #pressure applied, equal to 1 bar (varies with the surface area)
+
+#### Avoid the drift of electrolytes during simulation:
+#fix f_nodrift rest momentum 1 linear 1 1 0 rescale
+
+# ----------------- Run Section -----------------
+
+##### energy minimization---- initial structure, reform from system.data:(remove all fixes at first)
+#change_box all z final $(-lz/2) $(lz/2) remap units box
+#minimize 1.0e-5 1.0e-7 1000 10000
+#fix fbox all box/relax z 1.0 dilate rest
+
+##### 1. Nose-Hoover simulation:
+#fix fnvt1 rest nvt temp 300 300 100
+#fix_modify fnvt1 temp Crest
+
+#### 1.5 NPT simulation:
+fix fnvt1_5 rest npt temp 330 330 100 z 1 1 100 dilate rest
+#fix_modify fnvt1 temp Crest
+
+##### 2. langevin simulation:
+#fix flgv2 rest langevin 330 330 500 45678
+#fix_modify flgv2 temp Crest
+#fix nve2 rest nve
+
+##### 3. global velocity rescaling + Nose-Hoover simulation:
+#fix fcsvr3 rest temp/csvr 350.0 350.0 5 567000
+#fix_modify fcsvr3 temp Crest
+#fix nve3 rest nve
+
+##### 4. global velocity rescaling + langevin simulation:
+#fix fcsld4 rest temp/csld 350.0 350.0 500 567000
+#fix_modify fcsld4 temp Crest
+#fix nve4 rest nve
+
+#------------------time steps ------------------
+timestep 2
+run 1000
+
+#------------------write new data file ------------------
+write_data after_system.data nocoeff  #pair ij #nocoeff
+
